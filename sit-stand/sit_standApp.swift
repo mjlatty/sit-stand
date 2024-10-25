@@ -13,12 +13,12 @@ struct SitStandTimerApp: App {
     }
 }
 
-// App Delegate to handle menu bar setup
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem?
     var popover: NSPopover?
     var timer: Timer?
     var eventMonitor: Any?
+    var timerManager: TimerManager?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         // Request notification permissions
@@ -27,6 +27,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 print("Notification permission granted")
             }
         }
+        
+        // Create a single instance of TimerManager
+        let timerManager = TimerManager()
+        self.timerManager = timerManager
         
         // Create the status bar item
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -37,7 +41,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentSize = NSSize(width: 300, height: 200)
         popover.behavior = .transient
         popover.contentViewController = NSHostingController(
-            rootView: ContentView(timerManager: TimerManager())
+            rootView: ContentView(timerManager: timerManager)  // Use the same instance
         )
         self.popover = popover
         setupEventMonitor()
@@ -46,23 +50,61 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem?.button?.action = #selector(togglePopover)
         statusItem?.button?.target = self
         
+        // Initial update of the menu bar
+        updateMenuBarIcon()
+        
+        // Add observers
         NotificationCenter.default.addObserver(
            self,
            selector: #selector(handleStandingStateChange),
            name: .standingStateChanged,
            object: nil
        )
-    }
-    
-    func updateMenuBarIcon(isStanding: Bool) {
-        let icon = isStanding ? "🧍" : "💺"  // Different icon options
-        statusItem?.button?.title = icon
+        
+        NotificationCenter.default.addObserver(
+           self,
+           selector: #selector(handleTimeChange),
+           name: .timeRemainingChanged,
+           object: nil
+       )
+        
+        NotificationCenter.default.addObserver(self, selector: #selector(handlePausedStateChange), name: .pausedStateChanged, object: nil)
     }
     
     @objc func handleStandingStateChange(_ notification: Notification) {
-        if let isStanding = notification.userInfo?["isStanding"] as? Bool {
-            updateMenuBarIcon(isStanding: isStanding)
+        DispatchQueue.main.async { [weak self] in
+            self?.updateMenuBarIcon()
         }
+    }
+    
+    @objc func handleTimeChange(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.updateMenuBarIcon()
+        }
+    }
+    
+    @objc func handlePausedStateChange(_ notification: Notification) {
+        DispatchQueue.main.async { [weak self] in
+            self?.updateMenuBarIcon()
+        }
+    }
+    
+    func updateMenuBarIcon() {
+        guard let timerManager = timerManager else { return }
+        var icon = ""
+        if timerManager.isPaused {
+            icon = "⏸"
+        } else {
+            icon = timerManager.isStanding ? "⬆️" : "⬇️"
+        }
+        
+       
+        let timeRemaining = timerManager.timeRemaining
+        let minutes = timeRemaining / 60
+        let seconds = timeRemaining % 60
+        let timeString = String(format: "%d:%02d", minutes, seconds)
+        
+        statusItem?.button?.title = "\(icon) \(timeString)"
     }
     
     func setupEventMonitor() {
