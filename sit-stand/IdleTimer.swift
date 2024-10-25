@@ -9,6 +9,7 @@ class IdleTimer {
     private var timer: Timer?
     private var callback: ((Bool) -> Void)?
     private let idleThreshold: TimeInterval = 10 // 1 minute in seconds // TODO switch back to a minute
+    private var isCurrentlyIdle = false
     
     // Comprehensive list of video conferencing apps
     private let meetingApps = [
@@ -212,26 +213,32 @@ class IdleTimer {
     }
     
     private func checkIdle() {
-        // Get system idle time using IOKit
-        var idleTime: Double = 0
-        var iter: io_iterator_t = 0
-        
-        if IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOHIDSystem"), &iter) == KERN_SUCCESS {
-            let entry = IOIteratorNext(iter)
-            if entry != 0 {
-                var dict: Unmanaged<CFMutableDictionary>?
-                if IORegistryEntryCreateCFProperties(entry, &dict, kCFAllocatorDefault, 0) == KERN_SUCCESS {
-                    if let userActivity = (dict?.takeUnretainedValue() as NSDictionary?)?.value(forKey: "HIDIdleTime") as? NSNumber {
-                        idleTime = userActivity.doubleValue / 1_000_000_000 // Convert nanoseconds to seconds
-                    }
-                }
-                IOObjectRelease(entry)
-            }
-            IOObjectRelease(iter)
-        }
-        
-        callback?(idleTime >= idleThreshold)
-    }
+       // Get system idle time using IOKit
+       var idleTime: Double = 0
+       var iter: io_iterator_t = 0
+       
+       if IOServiceGetMatchingServices(kIOMainPortDefault, IOServiceMatching("IOHIDSystem"), &iter) == KERN_SUCCESS {
+           let entry = IOIteratorNext(iter)
+           if entry != 0 {
+               var dict: Unmanaged<CFMutableDictionary>?
+               if IORegistryEntryCreateCFProperties(entry, &dict, kCFAllocatorDefault, 0) == KERN_SUCCESS {
+                   if let userActivity = (dict?.takeUnretainedValue() as NSDictionary?)?.value(forKey: "HIDIdleTime") as? NSNumber {
+                       idleTime = userActivity.doubleValue / 1_000_000_000 // Convert nanoseconds to seconds
+                   }
+               }
+               IOObjectRelease(entry)
+           }
+           IOObjectRelease(iter)
+       }
+       
+       let newIdleState = idleTime >= idleThreshold
+       
+       // Only call callback if state has changed
+       if newIdleState != isCurrentlyIdle {
+           isCurrentlyIdle = newIdleState
+           callback?(newIdleState)
+       }
+   }
     
     // Helper class to check audio playback status
     class NowPlaying {

@@ -12,24 +12,25 @@ extension Notification.Name {
 // Timer Manager to handle timer logic
 class TimerManager: ObservableObject {
     @Published var isStanding = false {
-            didSet {
-                // Notify of state change
-                NotificationCenter.default.post(
-                    name: .standingStateChanged,
-                    object: nil,
-                    userInfo: ["isStanding": isStanding]
-                )
-            }
+        didSet {
+            NotificationCenter.default.post(
+                name: .standingStateChanged,
+                object: nil,
+                userInfo: ["isStanding": isStanding]
+            )
         }
+    }
+    
     @Published var timeRemaining: Int = 30 * 60 {
-            didSet {
-                NotificationCenter.default.post(
-                    name: .timeRemainingChanged,
-                    object: nil,
-                    userInfo: ["timeRemaining": timeRemaining]
-                )
-            }
+        didSet {
+            NotificationCenter.default.post(
+                name: .timeRemainingChanged,
+                object: nil,
+                userInfo: ["timeRemaining": timeRemaining]
+            )
         }
+    }
+    
     @Published var isActive = false
     @Published var isPaused = false {
         didSet {
@@ -38,15 +39,14 @@ class TimerManager: ObservableObject {
                 object: nil,
                 userInfo: ["isPaused": isPaused]
             )
-            // Reset idle state when manually unpaused
-            if !isPaused {
-                isIdle = false
-                activityType = .active
-            }
         }
     }
     @Published var isIdle = false
     @Published var activityType: ActivityType = .active
+    
+    private var timer: Timer?
+    private var idleTimer: IdleTimer?
+    private var isAutoPaused = false
     
     enum ActivityType {
         case active
@@ -55,87 +55,65 @@ class TimerManager: ObservableObject {
         case watchingVideo
     }
     
-    private var timer: Timer?
-    private var idleTimer: IdleTimer?
-    
     init() {
-        // Post initial states
-        NotificationCenter.default.post(
-            name: .standingStateChanged,
-            object: nil,
-            userInfo: ["isStanding": isStanding]
-        )
-        NotificationCenter.default.post(
-            name: .timeRemainingChanged,
-            object: nil,
-            userInfo: ["timeRemaining": timeRemaining]
-        )
-        
-        // Setup idle timer with enhanced status reporting
+        setupIdleTimer()
+    }
+    
+    private func setupIdleTimer() {
         idleTimer = IdleTimer { [weak self] isIdle in
             DispatchQueue.main.async {
-                self?.isIdle = isIdle
-                if isIdle {
-                    self?.activityType = .idle
-                    self?.autoPause()
+                guard let self = self else { return }
+                self.isIdle = isIdle
+                self.activityType = isIdle ? .idle : .active
+                
+                if isIdle && self.isActive && !self.isPaused {
+                    self.isAutoPaused = true
+                    self.isPaused = true
+                } else if !isIdle && self.isActive && self.isPaused && self.isAutoPaused {
+                    self.isAutoPaused = false
+                    self.isPaused = false
+                }
+                
+                self.updateTimer()
+            }
+        }
+    }
+    
+    private func updateTimer() {
+        timer?.invalidate()
+        timer = nil
+        
+        if isActive && !isPaused {
+            timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+                if self.timeRemaining > 0 {
+                    self.timeRemaining -= 1
                 } else {
-                    self?.activityType = .active
+                    self.switchPosition()
                 }
             }
         }
     }
     
     func toggleTimer() {
-        if isActive {
-            stopTimer()
-        } else {
-            startTimer()
+        isActive.toggle()
+        if !isActive {
+            isPaused = false
+            isAutoPaused = false
         }
+        updateTimer()
     }
     
     func togglePause() {
+        isAutoPaused = false  // Manual pause/unpause
         isPaused.toggle()
-        if isPaused {
-            timer?.invalidate()
-            timer = nil
-        } else {
-            startTimer()
-        }
-    }
-        
-    private func autoPause() {
-        if isActive && !isPaused {
-            isPaused = true
-            timer?.invalidate()
-            timer = nil
-        }
-    }
-    
-    func startTimer() {
-        isActive = true
-        isPaused = false
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
-            if self.timeRemaining > 0 {
-                self.timeRemaining -= 1
-            } else {
-                self.switchPosition()
-            }
-        }
-    }
-        
-    func stopTimer() {
-        isActive = false
-        isPaused = false
-        timer?.invalidate()
-        timer = nil
+        updateTimer()
     }
     
     func switchPosition() {
         isStanding.toggle()
-        timeRemaining = 30 * 60 // Reset to 30 minutes
+        timeRemaining = 30 * 60
         
-        // Send notification
         let content = UNMutableNotificationContent()
         content.title = "Time to \(isStanding ? "Stand" : "Sit")!"
         content.body = "Switch your desk position"
